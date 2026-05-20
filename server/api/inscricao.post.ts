@@ -1,6 +1,8 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { getSiteRoot } from '../utils/versioning'
+
+const STORAGE_ROOT = process.env.SIRIUS_STORAGE_ROOT
+  ?? path.join(process.cwd(), '..', '..', '..', 'storage')
 
 interface Inscricao {
   id: string
@@ -16,7 +18,7 @@ interface Inscricao {
 
 export default defineEventHandler(async (event) => {
   const siteId = event.context.siteId as string
-  const inscricoesFile = path.join(getSiteRoot(siteId), '_inscricoes', 'inscricoes.json')
+  const inscricoesFile = path.join(STORAGE_ROOT, siteId, '_inscricoes', 'inscricoes.json')
 
   async function readInscricoes(): Promise<Inscricao[]> {
     try {
