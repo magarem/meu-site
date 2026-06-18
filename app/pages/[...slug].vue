@@ -1,8 +1,6 @@
 <script setup>
 import { computed, ref, resolveComponent } from 'vue';
-import { useMediaUrl } from '~/composables/useMediaUrl';
 import { useRoute } from 'vue-router';
-import MultiImageBanner from '~/components/MultiImageBanner.vue';
 
 const route = useRoute();
 const previewCookie = useCookie('preview_layer');
@@ -21,7 +19,7 @@ const targetUrl = computed(() => {
 // 2. Fetch page data — static key + separate Vue watch (the useAsyncData
 // `watch` option fires during route transitions and corrupts data state).
 const { data: pageData, pending, error, refresh } = await useAsyncData(
-  'page-content',
+  () => `page-content:${targetUrl.value}:${route.query.version || previewCookie.value || ''}`,
   () => $fetch('/api/content', {
     query: {
       path: targetUrl.value,
@@ -30,16 +28,16 @@ const { data: pageData, pending, error, refresh } = await useAsyncData(
   })
 );
 
-watch(
-  [() => route.path, () => route.query.version, previewCookie],
-  () => refresh()
-);
-
 // 3. Unwrap inner data envelope
 const pageContent = computed(() => pageData.value?.data || {});
 
 // 3b. Blocks
-const allBlocks = computed(() => pageContent.value?.blocks || []);
+const allBlocks     = computed(() => (pageContent.value?.blocks || []).filter(b => b.active !== false));
+const heroBlocks    = computed(() => allBlocks.value.filter(b => b.isHero === true || b.isHero === 'true'));
+const contentBlocks = computed(() => allBlocks.value.filter(b => !b.isHero || b.isHero === 'false'));
+
+definePageMeta({ layout: false });
+const layoutName = computed(() => heroBlocks.value.length > 0 ? 'topbar-glass' : 'default');
 
 // 4. Resolve component
 const getDynamicComponent = (name) => {
@@ -67,6 +65,29 @@ const { resolve: resolveImg } = useMediaUrl(() => targetUrl.value);
 const lightboxOpen = ref(false);
 const lightboxIndex = ref(0);
 
+// Preview mode — floating edit buttons
+const isInIframe = ref(false)
+onMounted(() => {
+  isInIframe.value = window !== window.parent
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible')
+        observer.unobserve(entry.target)
+      }
+    })
+  }, { threshold: 0.08 })
+
+  document.querySelectorAll('.sirius-block-reveal').forEach(el => observer.observe(el))
+})
+const isPreview = computed(() => !!(route.query.version || previewCookie.value))
+
+function editBlock(block, blockIndex) {
+  if (!isInIframe.value) return
+  window.parent.postMessage({ type: 'sirius:editBlock', blockId: block.id, blockIndex, pagePath: targetUrl.value }, '*')
+}
+
 // 6. Share
 const linkCopied = ref(false);
 const copyLink = async () => {
@@ -76,6 +97,18 @@ const copyLink = async () => {
 };
 
 // 7. Breadcrumbs
+const { data: siteConfig } = await useAsyncData('site-config', () => $fetch('/api/site-config'));
+const breadcrumbMode = computed(() => {
+  if (!pageContent.value?._isCollectionItem) return 'hidden';
+  return siteConfig.value?.breadcrumbMode || 'complete';
+});
+
+const BLOCKS_GAP_MAP = { none: '0px', sm: '12px', md: '28px', lg: '48px', xl: '80px' }
+const blocksGap = computed(() => {
+  const key = siteConfig.value?.blocksGap || 'md'
+  return BLOCKS_GAP_MAP[key] || BLOCKS_GAP_MAP.md
+})
+
 const breadcrumbs = computed(() => {
   const parts = route.path.split('/').filter(Boolean);
   return [
@@ -86,6 +119,13 @@ const breadcrumbs = computed(() => {
     })),
   ];
 });
+
+// In 'parents-only' mode, strip the last crumb (current page name)
+const visibleCrumbs = computed(() =>
+  breadcrumbMode.value === 'parents-only'
+    ? breadcrumbs.value.slice(0, -1)
+    : breadcrumbs.value
+);
 
 // ── SEO ──────────────────────────────────────────────────────
 
@@ -172,6 +212,7 @@ useHead(computed(() => {
 </script>
 
 <template>
+  <NuxtLayout :name="layoutName">
   <div class="w-full transition-colors duration-500">
 
     <!-- ── Loading ─────────────────────────────────────────────── -->
@@ -202,18 +243,49 @@ useHead(computed(() => {
     </div>
 
     <!-- ── Page ─────────────────────────────────────────────────── -->
-    <template v-else-if="pageData">
+    <template v-else-if="pageData" >
+
+      <!-- ── Hero zone (full-width, above breadcrumbs) ─────────────── -->
+      <section v-if="heroBlocks.length" id="hero-zone" class="w-full">
+        <template v-for="block in heroBlocks" :key="'hero-' + block.id">
+          <div :id="block.props?.sectionId || undefined" class="relative group/editblock">
+            <div v-if="isPreview && isInIframe" class="absolute inset-0 z-[9997] pointer-events-none border-2 border-indigo-400 opacity-0 group-hover/editblock:opacity-100 transition-opacity duration-150"></div>
+            <component
+              v-if="getDynamicComponent(block.componentName)"
+              :is="getDynamicComponent(block.componentName)"
+              v-bind="block.props"
+              :id="block.id"
+              :page-path="targetUrl"
+            />
+            <div v-else class="p-5 bg-red-500/10 text-red-500 rounded-cartao border border-red-500/20 text-center text-sm">
+              ⚠️ Componente <strong>{{ block.componentName }}</strong> não encontrado.
+            </div>
+            <button
+              v-if="isPreview && isInIframe"
+              class="absolute top-3 right-3 z-[9998] opacity-0 group-hover/editblock:opacity-100 transition-opacity duration-200 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/75 backdrop-blur-sm text-white text-xs font-semibold border border-white/20 hover:bg-indigo-600 hover:border-indigo-400 shadow-xl cursor-pointer"
+              @click.stop="editBlock(block, allBlocks.indexOf(block))"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5 flex-shrink-0">
+                <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
+              </svg>
+              {{ block.label || block.componentName }}
+            </button>
+          </div>
+        </template>
+      </section>
+
+      <!-- ── Top spacer when breadcrumbs are hidden and no hero ─── -->
+      <div v-if="breadcrumbMode === 'hidden' && !heroBlocks.length" class="pt-8 md:pt-10"></div>
 
       <!-- ── Page header: breadcrumbs + title ─────────────────────── -->
-      <div class="w-full py-5 md:py-6">
+      <div v-if="breadcrumbMode !== 'hidden'" class="w-full py-5 md:py-6">
         <AppContainer size="content">
 
-          <nav class="flex items-center gap-1.5 text-text-muted text-[10px] font-medium uppercase tracking-widest mb-2">
-            <NuxtLink to="/" class="hover:text-primary transition-colors">Início</NuxtLink>
-            <template v-for="(crumb, i) in breadcrumbs.slice(1)" :key="i">
-              <i class="pi pi-angle-right opacity-30 text-[9px]"></i>
+          <nav v-if="breadcrumbMode !== 'hidden' && visibleCrumbs.length > 1" class="flex items-center gap-1.5 text-text-muted text-[10px] font-medium uppercase tracking-widest mb-2">
+            <template v-for="(crumb, i) in visibleCrumbs" :key="crumb.path">
+              <i v-if="i > 0" class="pi pi-angle-right opacity-30 text-[9px]"></i>
               <NuxtLink
-                v-if="i < breadcrumbs.length - 2"
+                v-if="i < visibleCrumbs.length - 1 || breadcrumbMode === 'parents-only'"
                 :to="crumb.path"
                 class="hover:text-primary transition-colors"
               >{{ crumb.label }}</NuxtLink>
@@ -245,6 +317,7 @@ useHead(computed(() => {
 
       <!-- ── Cover image (top) ─────────────────────────────────────── -->
       <multi-image-banner
+      class="py-5"
         v-if="topImages.length > 0"
         :images="topImages"
         :pagePath="targetUrl"
@@ -252,7 +325,7 @@ useHead(computed(() => {
       />
 
       <!-- ── Content + Side images ────────────────────────────────── -->
-      <AppContainer size="content" class="py-12 md:py-11">
+      <AppContainer size="content" :class="(parentIsCollection && breadcrumbMode !== 'hidden') ? 'pt-0 pb-12 md:pb-11' : 'py-12 md:py-11'">
         <div :class="sideImages.length > 0
           ? `grid grid-cols-1 items-start gap-10 md:gap-14 ${sidePosition === 'left' ? 'md:grid-cols-[300px_1fr]' : 'md:grid-cols-[1fr_300px]'}`
           : ''">
@@ -273,17 +346,30 @@ useHead(computed(() => {
           </aside>
 
           <!-- Main blocks -->
-          <main class="flex flex-col gap-10 md:gap-16 min-w-0">
-            <template v-for="block in allBlocks" :key="block.id">
-              <component
-                v-if="getDynamicComponent(block.componentName)"
-                :is="getDynamicComponent(block.componentName)"
-                v-bind="block.props"
-                :id="block.id"
-                :page-path="targetUrl"
-              />
-              <div v-else class="p-5 bg-red-500/10 text-red-500 rounded-cartao border border-red-500/20 text-center text-sm">
-                ⚠️ Componente <strong>{{ block.componentName }}</strong> não encontrado.
+          <main class="flex flex-col min-w-0" :style="{ gap: blocksGap }">
+            <template v-for="block in contentBlocks" :key="block.id">
+              <div :id="block.props?.sectionId || undefined" class="sirius-block-reveal relative group/editblock">
+                <div v-if="isPreview && isInIframe" class="absolute inset-0 z-[9997] pointer-events-none border-2 border-indigo-400 opacity-0 group-hover/editblock:opacity-100 transition-opacity duration-150"></div>
+                <component
+                  v-if="getDynamicComponent(block.componentName)"
+                  :is="getDynamicComponent(block.componentName)"
+                  v-bind="block.props"
+                  :id="block.id"
+                  :page-path="targetUrl"
+                />
+                <div v-else class="p-5 bg-red-500/10 text-red-500 rounded-cartao border border-red-500/20 text-center text-sm">
+                  ⚠️ Componente <strong>{{ block.componentName }}</strong> não encontrado.
+                </div>
+                <button
+                  v-if="isPreview && isInIframe"
+                  class="absolute top-3 right-3 z-[9998] opacity-0 group-hover/editblock:opacity-100 transition-opacity duration-200 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/75 backdrop-blur-sm text-white text-xs font-semibold border border-white/20 hover:bg-indigo-600 hover:border-indigo-400 shadow-xl cursor-pointer"
+                  @click.stop="editBlock(block, allBlocks.indexOf(block))"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5 flex-shrink-0">
+                    <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
+                  </svg>
+                  {{ block.label || block.componentName }}
+                </button>
               </div>
             </template>
           </main>
@@ -331,10 +417,20 @@ useHead(computed(() => {
     </template>
 
   </div>
-
+  </NuxtLayout>
 </template>
 
 <style scoped>
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+.sirius-block-reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.sirius-block-reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
 </style>
