@@ -102,12 +102,12 @@ const breadcrumbMode = computed(() => {
   if (!pageContent.value?._isCollectionItem) return 'hidden';
   return siteConfig.value?.breadcrumbMode || 'complete';
 });
+const showPageTitle  = computed(() => siteConfig.value?.showPageTitle !== false);
 
-const BLOCKS_GAP_MAP = { none: '0px', sm: '12px', md: '28px', lg: '48px', xl: '80px' }
-const blocksGap = computed(() => {
-  const key = siteConfig.value?.blocksGap || 'md'
-  return BLOCKS_GAP_MAP[key] || BLOCKS_GAP_MAP.md
-})
+const BLOCKS_GAP_MAP = { none: '0px', sm: '12px', md: '24px', lg: '48px', xl: '80px' }
+const PAGE_PADDING_MAP = { none: '0px', sm: '24px', md: '48px', lg: '80px', xl: '128px' }
+const blocksGap = computed(() => BLOCKS_GAP_MAP[siteConfig.value?.blocksGap] || BLOCKS_GAP_MAP.md)
+const pageVerticalPadding = computed(() => PAGE_PADDING_MAP[siteConfig.value?.pageVerticalPadding] || '0px')
 
 const breadcrumbs = computed(() => {
   const parts = route.path.split('/').filter(Boolean);
@@ -278,7 +278,7 @@ useHead(computed(() => {
       <div v-if="breadcrumbMode === 'hidden' && !heroBlocks.length" class="pt-8 md:pt-10"></div>
 
       <!-- ── Page header: breadcrumbs + title ─────────────────────── -->
-      <div v-if="breadcrumbMode !== 'hidden'" class="w-full py-5 md:py-6">
+      <div v-if="showPageTitle && pageContent?.title && !heroBlocks.length" class="w-full py-5 md:py-6">
         <AppContainer size="content">
 
           <nav v-if="breadcrumbMode !== 'hidden' && visibleCrumbs.length > 1" class="flex items-center gap-1.5 text-text-muted text-[10px] font-medium uppercase tracking-widest mb-2">
@@ -315,9 +315,12 @@ useHead(computed(() => {
         </AppContainer>
       </div>
 
+      <!-- ── Page body: top image + content blocks (pageVerticalPadding wraps both) -->
+      <div :style="{ paddingTop: pageVerticalPadding, paddingBottom: pageVerticalPadding }">
+
       <!-- ── Cover image (top) ─────────────────────────────────────── -->
       <multi-image-banner
-      class="py-5"
+        class="py-5"
         v-if="topImages.length > 0"
         :images="topImages"
         :pagePath="targetUrl"
@@ -325,7 +328,7 @@ useHead(computed(() => {
       />
 
       <!-- ── Content + Side images ────────────────────────────────── -->
-      <AppContainer size="content" :class="(parentIsCollection && breadcrumbMode !== 'hidden') ? 'pt-0 pb-12 md:pb-11' : 'py-12 md:py-11'">
+      <AppContainer size="content">
         <div :class="sideImages.length > 0
           ? `grid grid-cols-1 items-start gap-10 md:gap-14 ${sidePosition === 'left' ? 'md:grid-cols-[300px_1fr]' : 'md:grid-cols-[1fr_300px]'}`
           : ''">
@@ -391,6 +394,8 @@ useHead(computed(() => {
 
         </div>
       </AppContainer>
+
+      </div><!-- /pageVerticalPadding wrapper -->
 
       <!-- Lightbox -->
       <Teleport to="body">

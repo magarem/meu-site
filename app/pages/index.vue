@@ -19,35 +19,62 @@
       
       <section id="hero-zone" class="w-full">
         <template v-for="(block, index) in heroBlocks" :key="'hero-' + index">
-          <component
-            v-if="getDynamicComponent(block.componentName)"
-            :is="getDynamicComponent(block.componentName)"
-            v-bind="block.props"
-            page-path="home"
-          />
-          <div v-else class="p-6 my-4 mx-auto max-w-2xl bg-red-500/10 text-red-500 rounded-cartao border border-red-500/20 text-center">
-            ⚠️ Componente Hero <strong>{{ block.componentName }}</strong> não foi encontrado. Verifique o nome exato no JSON e na pasta components.
+          <div class="relative group/editblock">
+            <div v-if="isPreview && isInIframe" class="absolute inset-0 z-[9997] pointer-events-none border-2 border-indigo-400 opacity-0 group-hover/editblock:opacity-100 transition-opacity duration-150"></div>
+            <component
+              v-if="getDynamicComponent(block.componentName)"
+              :is="getDynamicComponent(block.componentName)"
+              v-bind="block.props"
+              :id="block.id"
+              page-path="home"
+            />
+            <div v-else class="p-6 my-4 mx-auto max-w-2xl bg-red-500/10 text-red-500 rounded-cartao border border-red-500/20 text-center">
+              ⚠️ Componente Hero <strong>{{ block.componentName }}</strong> não foi encontrado. Verifique o nome exato no JSON e na pasta components.
+            </div>
+            <button
+              v-if="isPreview && isInIframe"
+              class="absolute top-3 right-3 z-[9998] opacity-0 group-hover/editblock:opacity-100 transition-opacity duration-200 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/75 backdrop-blur-sm text-white text-xs font-semibold border border-white/20 hover:bg-indigo-600 hover:border-indigo-400 shadow-xl cursor-pointer"
+              @click.stop="editBlock(block)"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5 flex-shrink-0">
+                <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
+              </svg>
+              {{ block.label || block.componentName }}
+            </button>
           </div>
         </template>
       </section>
 
-      <main id="content-zone" class="w-full py-16 md:py-20 px-5 transition-colors duration-500">
-        
-        <AppContainer size="content" class="flex flex-col gap-16 md:gap-15">
+      <main id="content-zone" class="w-full transition-colors duration-500"
+        :style="{ paddingTop: pageVerticalPadding, paddingBottom: pageVerticalPadding }">
+
+        <div class="flex flex-col" :style="{ gap: blocksGap }">
           <template v-for="(block, index) in contentBlocks" :key="'content-' + index">
-            <div class="w-full">
+            <div class="relative group/editblock w-full">
+              <div v-if="isPreview && isInIframe" class="absolute inset-0 z-[9997] pointer-events-none border-2 border-indigo-400 opacity-0 group-hover/editblock:opacity-100 transition-opacity duration-150"></div>
               <component
                 v-if="getDynamicComponent(block.componentName)"
                 :is="getDynamicComponent(block.componentName)"
                 v-bind="block.props"
+                :id="block.id"
                 page-path="home"
               />
               <div v-else class="p-6 my-4 mx-auto w-full bg-red-500/10 text-red-500 rounded-cartao border border-red-500/20 text-center">
                 ⚠️ Componente de Conteúdo <strong>{{ block.componentName }}</strong> não foi encontrado. Verifique o nome exato no JSON e na pasta components.
               </div>
+              <button
+                v-if="isPreview && isInIframe"
+                class="absolute top-3 right-3 z-[9998] opacity-0 group-hover/editblock:opacity-100 transition-opacity duration-200 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/75 backdrop-blur-sm text-white text-xs font-semibold border border-white/20 hover:bg-indigo-600 hover:border-indigo-400 shadow-xl cursor-pointer"
+                @click.stop="editBlock(block)"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-3.5 h-3.5 flex-shrink-0">
+                  <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
+                </svg>
+                {{ block.label || block.componentName }}
+              </button>
             </div>
           </template>
-        </AppContainer>
+        </div>
 
       </main>
 
@@ -62,10 +89,26 @@ import { useRoute } from 'vue-router';
 const route = useRoute();
 const previewCookie = useCookie('preview_layer');
 const config = useRuntimeConfig();
+
+const isInIframe = ref(false)
+onMounted(() => { isInIframe.value = window !== window.parent })
+const isPreview = computed(() => !!(route.query.version || previewCookie.value))
+
+function editBlock(block) {
+  if (!isInIframe.value) return
+  const blockIndex = allBlocks.value.indexOf(block)
+  window.parent.postMessage({ type: 'sirius:editBlock', blockId: block.id, blockIndex, pagePath: 'home' }, '*')
+}
 const siteUrl = config.public.siteUrl || '';
 const siteName = config.public.siteName || '';
 
 definePageMeta({ layout: 'topbar-glass' });
+
+const { data: siteConfig } = await useAsyncData('site-config', () => $fetch('/api/site-config'));
+const BLOCKS_GAP_MAP = { none: '0px', sm: '12px', md: '24px', lg: '48px', xl: '80px' }
+const PAGE_PADDING_MAP = { none: '0px', sm: '24px', md: '48px', lg: '80px', xl: '128px' }
+const blocksGap = computed(() => BLOCKS_GAP_MAP[siteConfig.value?.blocksGap] || BLOCKS_GAP_MAP.md)
+const pageVerticalPadding = computed(() => PAGE_PADDING_MAP[siteConfig.value?.pageVerticalPadding] || '0px')
 
 const { data: response, pending, error, refresh } = await useAsyncData(
   `home-page-data-${route.query.version || previewCookie.value || 'base'}`,
@@ -83,7 +126,8 @@ watch(() => route.query.version, () => refresh());
 
 const allBlocks = computed(() => {
   const rawData = response.value?.data || {};
-  return Array.isArray(rawData) ? rawData : (rawData.blocks || []);
+  const list = Array.isArray(rawData) ? rawData : (rawData.blocks || []);
+  return list.filter(b => b.active !== false);
 });
 const heroBlocks = computed(() =>
   allBlocks.value.filter(b => b.isHero === true || b.isHero === 'true')
